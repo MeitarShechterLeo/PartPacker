@@ -27,27 +27,7 @@ from vae.model import Model
 from vae.utils import box_normalize, postprocess_mesh, sphere_normalize, sync_timer
 
 # PYTHONPATH=. python vae/scripts/infer.py
-parser = argparse.ArgumentParser()
-parser.add_argument("--config", type=str, help="config file path", default="vae.configs.part_woenc")
-parser.add_argument(
-    "--ckpt_path",
-    type=str,
-    help="checkpoint path",
-    default="pretrained/vae.pt",
-)
-parser.add_argument("--input", type=str, help="input directory", default="assets/meshes/")
-parser.add_argument("--output_dir", type=str, help="output directory", default="output/")
-parser.add_argument("--limit", type=int, help="how many samples to test", default=-1)
-parser.add_argument("--num_fps_point", type=int, help="number of fps points", default=1024)
-parser.add_argument("--num_fps_salient_point", type=int, help="number of fps salient points", default=1024)
-parser.add_argument("--grid_res", type=int, help="grid resolution", default=512)
-parser.add_argument("--seed", type=int, help="seed", default=42)
-args = parser.parse_args()
 
-
-TRIMESH_GLB_EXPORT = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]]).astype(np.float32)
-
-kiui.seed_everything(args.seed)
 
 
 @sync_timer("prepare_input_from_mesh")
@@ -90,53 +70,78 @@ def prepare_input_from_mesh(mesh_path, use_salient_point=True, num_fps_point=102
     return sample
 
 
-print(f"Loading checkpoint from {args.ckpt_path}")
-ckpt_dict = torch.load(args.ckpt_path, weights_only=True)
 
-# delete all keys other than model
-if "model" in ckpt_dict:
-    ckpt_dict = ckpt_dict["model"]
 
-# instantiate model
-print(f"Instantiating model from {args.config}")
-model_config = importlib.import_module(args.config).make_config()
-model = Model(model_config).eval().cuda().bfloat16()
-
-# load weight
-print(f"Loading weights from {args.ckpt_path}")
-model.load_state_dict(ckpt_dict, strict=True)
-
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-workspace = os.path.join(args.output_dir, "vae_" + args.config.split(".")[-1] + "_" + timestamp)
-if not os.path.exists(workspace):
-    os.makedirs(workspace)
-else:
-    os.system(f"rm {workspace}/*")
-print(f"Output directory: {workspace}")
-
-# load dataset
-mesh_list = glob.glob(os.path.join(args.input, "*"))
-mesh_list = mesh_list[: args.limit] if args.limit > 0 else mesh_list
-
-for i, mesh_path in enumerate(mesh_list):
-    print(f"Processing {i}/{len(mesh_list)}: {mesh_path}")
-
-    mesh_name = mesh_path.split("/")[-1].split(".")[0]
-
-    sample = prepare_input_from_mesh(
-        mesh_path, num_fps_point=args.num_fps_point, num_fps_salient_point=args.num_fps_salient_point
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, help="config file path", default="vae.configs.part_woenc")
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        help="checkpoint path",
+        default="pretrained/vae.pt",
     )
-    for k in sample:
-        sample[k] = sample[k].unsqueeze(0).cuda()
+    parser.add_argument("--input", type=str, help="input directory", default="assets/meshes/")
+    parser.add_argument("--output_dir", type=str, help="output directory", default="output/")
+    parser.add_argument("--limit", type=int, help="how many samples to test", default=-1)
+    parser.add_argument("--num_fps_point", type=int, help="number of fps points", default=1024)
+    parser.add_argument("--num_fps_salient_point", type=int, help="number of fps salient points", default=1024)
+    parser.add_argument("--grid_res", type=int, help="grid resolution", default=512)
+    parser.add_argument("--seed", type=int, help="seed", default=42)
+    args = parser.parse_args()
 
-    # call vae
-    with torch.inference_mode():
-        output = model(sample, resolution=args.grid_res)
 
-    latent = output["latent"]
-    vertices, faces = output["meshes"][0]
+    TRIMESH_GLB_EXPORT = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]]).astype(np.float32)
 
-    mesh = trimesh.Trimesh(vertices, faces)
-    mesh = postprocess_mesh(mesh, 5e5)
+    kiui.seed_everything(args.seed)
+    
+    print(f"Loading checkpoint from {args.ckpt_path}")
+    ckpt_dict = torch.load(args.ckpt_path, weights_only=True)
 
-    mesh.export(f"{workspace}/{mesh_name}.glb")
+    # delete all keys other than model
+    if "model" in ckpt_dict:
+        ckpt_dict = ckpt_dict["model"]
+
+    # instantiate model
+    print(f"Instantiating model from {args.config}")
+    model_config = importlib.import_module(args.config).make_config()
+    model = Model(model_config).eval().cuda().bfloat16()
+
+    # load weight
+    print(f"Loading weights from {args.ckpt_path}")
+    model.load_state_dict(ckpt_dict, strict=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    workspace = os.path.join(args.output_dir, "vae_" + args.config.split(".")[-1] + "_" + timestamp)
+    if not os.path.exists(workspace):
+        os.makedirs(workspace)
+    else:
+        os.system(f"rm {workspace}/*")
+    print(f"Output directory: {workspace}")
+
+    # load dataset
+    mesh_list = glob.glob(os.path.join(args.input, "*"))
+    mesh_list = mesh_list[: args.limit] if args.limit > 0 else mesh_list
+
+    for i, mesh_path in enumerate(mesh_list):
+        print(f"Processing {i}/{len(mesh_list)}: {mesh_path}")
+
+        mesh_name = mesh_path.split("/")[-1].split(".")[0]
+
+        sample = prepare_input_from_mesh(
+            mesh_path, num_fps_point=args.num_fps_point, num_fps_salient_point=args.num_fps_salient_point
+        )
+        for k in sample:
+            sample[k] = sample[k].unsqueeze(0).cuda()
+
+        # call vae
+        with torch.inference_mode():
+            output = model(sample, resolution=args.grid_res)
+
+        latent = output["latent"]
+        vertices, faces = output["meshes"][0]
+
+        mesh = trimesh.Trimesh(vertices, faces)
+        mesh = postprocess_mesh(mesh, 5e5)
+
+        mesh.export(f"{workspace}/{mesh_name}.glb")

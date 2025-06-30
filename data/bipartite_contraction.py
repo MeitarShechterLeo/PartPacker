@@ -24,18 +24,6 @@ import tqdm
 import trimesh
 from meshiki import Mesh
 
-parser = argparse.ArgumentParser()
-parser.add_argument("test_path", type=str, help="path to the mesh file or folder")
-parser.add_argument("--verbose", action="store_true", help="print verbose output")
-parser.add_argument("--force_cc", action="store_true", help="force to use connected components and ignore glb groups")
-parser.add_argument("--no_smart_group", action="store_true", help="do not perform smart grouping")
-parser.add_argument("--no_stitch", action="store_true", help="do not stitch open boundaries")
-parser.add_argument("--no_merge_odd_loops", action="store_true", help="do not merge odd loops")
-parser.add_argument("--no_dilate", action="store_true", help="do not dilate the mesh")
-parser.add_argument("--dilate_size", type=float, default=2 / 512, help="dilate size")
-parser.add_argument("--workspace", type=str, default="output", help="path to the output folder")
-opt = parser.parse_args()
-
 
 class NamedDisjointSet:
     def __init__(self, names):
@@ -475,31 +463,7 @@ def merge_odd_loops(meshes: dict, graph: dict, penetration_depths: dict):
     return meshes, graph_new
 
 
-def run(path):
-    print(f"[INFO] processing {path}")
-
-    mesh = trimesh.load(path)
-
-    if not opt.force_cc and isinstance(mesh, trimesh.Scene) and len(mesh.geometry) > 1:
-        print(f"[INFO] scene: {len(mesh.geometry)} meshes")
-        scene = mesh
-
-    else:
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.to_mesh()
-        # use meshiki backend
-        mesh = Mesh(mesh.vertices, mesh.faces, verbose=opt.verbose, clean=False)
-        mesh.smart_group_components()
-        scene = mesh.export_components_as_trimesh_scene()
-
-        # use trimesh
-        # meshes = mesh.split(only_watertight=False)
-        # # print(meshes)
-        # scene = trimesh.Scene()
-        # for mesh in meshes:
-        #     scene.add_geometry(mesh)
-        print(f"[INFO] mesh: {len(scene.geometry)} components")
-
+def normalize_scene(scene):
     ### box normalize into [-1, 1]
     bounds = scene.bounds  # [2, 3]
     center = scene.centroid  # [3]
@@ -527,22 +491,15 @@ def run(path):
             mesh.fix_normals()
             meshes[name] = mesh
 
-    ### smart grouping to avoid too many single-layer surface or too small objects
-    if not opt.no_smart_group:
-        meshes = smart_grouping(meshes)
+    return meshes
 
-    ### stitch open boundaries to make each mesh watertight
-    if not opt.no_stitch:
-        for name, mesh in meshes.items():
-            stitch_nonwatertight_mesh(mesh)
-
-    ### coloring
+def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=False):
     # build an undirected collision graph
     manager = trimesh.collision.CollisionManager()
     for name, mesh in meshes.items():
         # scale up the mesh a little bit to take count of the collision margin
         mesh_dilated = mesh.copy()
-        if not opt.no_dilate:
+        if not no_dilate:
             center = mesh_dilated.centroid
             vertices = mesh_dilated.vertices - center
             max_radius = np.max(np.linalg.norm(vertices, axis=-1))
@@ -565,7 +522,7 @@ def run(path):
         penetration_depths[name_key] = penetration_depth
 
     # merge odd loops
-    if not opt.no_merge_odd_loops:
+    if not no_merge_odd_loops:
         # if the graph is too complex, we will skip since it takes forever
         num_edges = sum(len(edges) for edges in graph.values())
         if num_edges > 100:
@@ -573,7 +530,7 @@ def run(path):
         else:
             meshes, graph = merge_odd_loops(meshes, graph, penetration_depths)
 
-    if opt.verbose:
+    if verbose:
         print(graph)
 
     # sort objects by distance to center
@@ -603,7 +560,7 @@ def run(path):
                 for neighbor in graph[name]:
                     if neighbor not in name_to_color:
                         name_to_color[neighbor] = 1 - name_to_color[name]
-                        if opt.verbose:
+                        if verbose:
                             print(f"[INFO] color {neighbor} with {name_to_color[neighbor]}")
                         queue.append(neighbor)
                     else:
@@ -618,6 +575,47 @@ def run(path):
             mesh_color0.append(meshes[name])
         else:
             mesh_color1.append(meshes[name])
+
+    return mesh_color0, mesh_color1
+
+def run(path):
+    print(f"[INFO] processing {path}")
+
+    mesh = trimesh.load(path)
+
+    if not opt.force_cc and isinstance(mesh, trimesh.Scene) and len(mesh.geometry) > 1:
+        print(f"[INFO] scene: {len(mesh.geometry)} meshes")
+        scene = mesh
+
+    else:
+        if isinstance(mesh, trimesh.Scene):
+            mesh = mesh.to_mesh()
+        # use meshiki backend
+        mesh = Mesh(mesh.vertices, mesh.faces, verbose=opt.verbose, clean=False)
+        mesh.smart_group_components()
+        scene = mesh.export_components_as_trimesh_scene()
+
+        # use trimesh
+        # meshes = mesh.split(only_watertight=False)
+        # # print(meshes)
+        # scene = trimesh.Scene()
+        # for mesh in meshes:
+        #     scene.add_geometry(mesh)
+        print(f"[INFO] mesh: {len(scene.geometry)} components")
+
+    meshes = normalize_scene(scene)
+
+    ### smart grouping to avoid too many single-layer surface or too small objects
+    if not opt.no_smart_group:
+        meshes = smart_grouping(meshes)
+
+    ### stitch open boundaries to make each mesh watertight
+    if not opt.no_stitch:
+        for name, mesh in meshes.items():
+            stitch_nonwatertight_mesh(mesh)
+
+    ### coloring
+    mesh_color0, mesh_color1 = color_meshes(meshes, opt.no_dilate, opt.no_merge_odd_loops, opt.verbose)
 
     ### convert to a single mesh and export as glb
     mesh_color0 = trimesh.util.concatenate(mesh_color0)
@@ -634,11 +632,24 @@ def run(path):
     mesh_all.export(f"{opt.workspace}/{name}.obj")
 
 
-os.makedirs(opt.workspace, exist_ok=True)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("test_path", type=str, help="path to the mesh file or folder")
+    parser.add_argument("--verbose", action="store_true", help="print verbose output")
+    parser.add_argument("--force_cc", action="store_true", help="force to use connected components and ignore glb groups")
+    parser.add_argument("--no_smart_group", action="store_true", help="do not perform smart grouping")
+    parser.add_argument("--no_stitch", action="store_true", help="do not stitch open boundaries")
+    parser.add_argument("--no_merge_odd_loops", action="store_true", help="do not merge odd loops")
+    parser.add_argument("--no_dilate", action="store_true", help="do not dilate the mesh")
+    parser.add_argument("--dilate_size", type=float, default=2 / 512, help="dilate size")
+    parser.add_argument("--workspace", type=str, default="output", help="path to the output folder")
+    opt = parser.parse_args()
 
-if os.path.isdir(opt.test_path):
-    file_paths = glob.glob(os.path.join(opt.test_path, "*"))
-    for path in tqdm.tqdm(file_paths):
-        run(path)
-else:
-    run(opt.test_path)
+    os.makedirs(opt.workspace, exist_ok=True)
+
+    if os.path.isdir(opt.test_path):
+        file_paths = glob.glob(os.path.join(opt.test_path, "*"))
+        for path in tqdm.tqdm(file_paths):
+            run(path)
+    else:
+        run(opt.test_path)

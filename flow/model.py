@@ -197,7 +197,7 @@ class Model(nn.Module):
         loss = 0
 
         cond_images = self.preprocess_cond_image(
-            data["cond_images"]
+            data["cond_image"]
         )  # [B, N, 3, 518, 518], we may load multiple (N) cond images for the same shape
         B, N, C, H, W = cond_images.shape
 
@@ -277,7 +277,7 @@ class Model(nn.Module):
         generator: torch.Generator | None = None,
     ) -> dict[str, torch.Tensor]:
         # the inference sampling
-        cond_images = self.preprocess_cond_image(data["cond_images"])  # [B, 3, 518, 518]
+        cond_images = self.preprocess_cond_image(data["cond_image"])  # [B, 3, 518, 518]
         B = cond_images.shape[0]
         assert B == 1, "Only support batch size 1 for now."
 
