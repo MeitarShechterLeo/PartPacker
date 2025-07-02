@@ -24,8 +24,8 @@ class ModelConfig:
     # learn & generate parts
     use_parts: bool = False
     part_embed_mode: Literal["element", "part", "part2_only"] = "part2_only"
-    shuffle_parts: bool = False
-    use_num_parts_cond: bool = False
+    shuffle_parts: bool = True
+    use_num_parts_cond: bool = False # True TODO 
 
     # flow matching hyper-params
     flow_shift: float = 1.0

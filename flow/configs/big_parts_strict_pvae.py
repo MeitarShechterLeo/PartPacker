@@ -16,8 +16,8 @@ from flow.configs.schema import ModelConfig
 def make_config():
 
     model_config = ModelConfig(
-        vae_conf="vae.configs.part_woenc",
-        vae_ckpt_path="pretrained/vae.pt",
+        vae_conf="src.PartPackerFT.PartPacker.vae.configs.part_woenc",
+        vae_ckpt_path="src/PartPackerFT/PartPacker/pretrained/vae.pt",
         qknorm=True,
         qknorm_type="RMSNorm",
         use_pos_embed=False,

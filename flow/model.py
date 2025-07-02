@@ -153,7 +153,7 @@ class Model(nn.Module):
 
     # this happens before checkpointer loading old models !!!
     def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
-        super().on_train_start(memory_format=memory_format)
+        # super().on_train_start(memory_format=memory_format)
         device = next(self.dit.parameters()).device
 
         self.dit.to(dtype=self.precision)
@@ -209,9 +209,8 @@ class Model(nn.Module):
         cond = self.get_cond(cond_images.view(-1, C, H, W), cond_num_part)  # [B*N, L, C]
 
         # random CFG dropout
-        if self.training:
-            mask = torch.rand((B * N, 1, 1), device=cond.device, dtype=cond.dtype) >= 0.1
-            cond = cond * mask
+        mask = torch.rand((B * N, 1, 1), device=cond.device, dtype=cond.dtype) >= 0.1
+        cond = cond * mask
 
         with torch.no_grad():
             # encode latent
