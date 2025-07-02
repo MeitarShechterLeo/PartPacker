@@ -493,7 +493,7 @@ def normalize_scene(scene):
 
     return meshes
 
-def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=False):
+def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=False, dilate_size=2/512):
     # build an undirected collision graph
     manager = trimesh.collision.CollisionManager()
     for name, mesh in meshes.items():
@@ -503,7 +503,7 @@ def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=Fals
             center = mesh_dilated.centroid
             vertices = mesh_dilated.vertices - center
             max_radius = np.max(np.linalg.norm(vertices, axis=-1))
-            scale = (max_radius + opt.dilate_size) / max_radius
+            scale = (max_radius + dilate_size) / max_radius
             # print(f'[INFO] dilate {name} by {scale}')
             mesh_dilated.vertices = vertices * scale + center
         manager.add_object(name, mesh_dilated)
@@ -615,7 +615,7 @@ def run(path):
             stitch_nonwatertight_mesh(mesh)
 
     ### coloring
-    mesh_color0, mesh_color1 = color_meshes(meshes, opt.no_dilate, opt.no_merge_odd_loops, opt.verbose)
+    mesh_color0, mesh_color1 = color_meshes(meshes, opt.no_dilate, opt.no_merge_odd_loops, opt.verbose, opt.dilate_size)
 
     ### convert to a single mesh and export as glb
     mesh_color0 = trimesh.util.concatenate(mesh_color0)

@@ -70,8 +70,6 @@ def prepare_input_from_mesh(mesh_path, use_salient_point=True, num_fps_point=102
     return sample
 
 
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, help="config file path", default="vae.configs.part_woenc")

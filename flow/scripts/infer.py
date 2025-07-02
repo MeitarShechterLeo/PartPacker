@@ -28,7 +28,7 @@ from flow.utils import get_random_color, recenter_foreground
 from vae.utils import postprocess_mesh
 
 # PYTHONPATH=. python flow/scripts/infer.py
-
+bg_remover = rembg.new_session()
 
 
 def preprocess_image(path):
@@ -72,8 +72,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     TRIMESH_GLB_EXPORT = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]]).astype(np.float32)
-
-    bg_remover = rembg.new_session()
     
     print(f"Loading checkpoint from {args.ckpt_path}")
     ckpt_dict = torch.load(args.ckpt_path, weights_only=True)

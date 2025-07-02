@@ -311,5 +311,9 @@ def box_normalize(vertices, bound=0.95):
     bmin = vertices.min(axis=0)
     bmax = vertices.max(axis=0)
     bcenter = (bmax + bmin) / 2
-    vertices = 2 * bound * (vertices - bcenter) / (bmax - bmin).max()
-    return vertices
+
+    def normalize(vertices):
+        vertices = 2 * bound * (vertices - bcenter) / (bmax - bmin).max()
+        return vertices
+
+    return normalize
