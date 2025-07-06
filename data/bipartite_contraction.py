@@ -354,7 +354,7 @@ def smart_grouping(meshes: dict):
         for name in group:
             del meshes[name]
 
-    print(f"[INFO] after grouping, num_meshes = {len(meshes)}")
+    # print(f"[INFO] after grouping, num_meshes = {len(meshes)}")
     return meshes
 
 
@@ -459,7 +459,7 @@ def merge_odd_loops(meshes: dict, graph: dict, penetration_depths: dict):
                     graph_new[neighbor].add(new_name)
             del graph_new[name]
 
-    print(f"[INFO] after merging odd loops, num_meshes = {len(meshes)}")
+    # print(f"[INFO] after merging odd loops, num_meshes = {len(meshes)}")
     return meshes, graph_new
 
 
@@ -493,7 +493,7 @@ def normalize_scene(scene):
 
     return meshes
 
-def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=False, dilate_size=2/512):
+def color_meshes(meshes, model_name, no_dilate=False, no_merge_odd_loops=False, verbose=False, dilate_size=2/512):
     # build an undirected collision graph
     manager = trimesh.collision.CollisionManager()
     for name, mesh in meshes.items():
@@ -526,7 +526,8 @@ def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=Fals
         # if the graph is too complex, we will skip since it takes forever
         num_edges = sum(len(edges) for edges in graph.values())
         if num_edges > 100:
-            print(f"[WARN] skip {path} because of too many edges: {num_edges}")
+            # print(f"[WARN] skip {model_name} because of too many edges: {num_edges}")
+            pass
         else:
             meshes, graph = merge_odd_loops(meshes, graph, penetration_depths)
 
@@ -550,6 +551,7 @@ def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=Fals
     name_to_color = {}
     queue = []
     initial_color = 0
+    print_warn = False
     for name, dist in name_with_dist:
         if name not in name_to_color:
             name_to_color[name] = initial_color
@@ -565,7 +567,13 @@ def color_meshes(meshes, no_dilate=False, no_merge_odd_loops=False, verbose=Fals
                         queue.append(neighbor)
                     else:
                         if name_to_color[neighbor] == name_to_color[name]:
-                            print(f"[WARN] {name} and {neighbor} have the same color!")
+                            if verbose: 
+                                print(f"[WARN] {name} and {neighbor} have the same color!")
+                            else:
+                                print_warn = True
+
+    # if not verbose and print_warn:
+    #     print(f"[WARN] {model_name} has at least one pair of meshes with the same color!")
 
     # get the two parts
     mesh_color0 = []
@@ -615,7 +623,7 @@ def run(path):
             stitch_nonwatertight_mesh(mesh)
 
     ### coloring
-    mesh_color0, mesh_color1 = color_meshes(meshes, opt.no_dilate, opt.no_merge_odd_loops, opt.verbose, opt.dilate_size)
+    mesh_color0, mesh_color1 = color_meshes(meshes, path, opt.no_dilate, opt.no_merge_odd_loops, opt.verbose, opt.dilate_size)
 
     ### convert to a single mesh and export as glb
     mesh_color0 = trimesh.util.concatenate(mesh_color0)
