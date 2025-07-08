@@ -17,12 +17,202 @@ sys.path.append(".")
 import argparse
 import glob
 import os
+import pickle
+import subprocess
+import tempfile
+import json
 
-import kiui
 import numpy as np
 import tqdm
 import trimesh
 from meshiki import Mesh
+
+
+def safe_collision_detection_subprocess(manager_data, return_names=True, return_data=False, timeout_seconds=23):
+    """
+    Safely perform collision detection using subprocess for maximum isolation.
+    
+    Args:
+        manager_data: dict of mesh objects
+        return_names: whether to return collision pair names
+        return_data: whether to return collision data
+        timeout_seconds: maximum time to wait for collision detection
+    
+    Returns:
+        tuple: (is_collide, collide_pairs, collide_data) or (is_collide, collide_pairs) depending on return_data
+    """
+    # Create temporary files for data exchange
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as input_file, \
+         tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as output_file:
+        
+        input_path = input_file.name
+        output_path = output_file.name
+    
+    try:
+        # Prepare data for subprocess
+        # Convert mesh objects to serializable format (vertices and faces)
+        serializable_data = {}
+        for name, mesh in manager_data.items():
+            serializable_data[name] = {
+                'vertices': mesh.vertices.tolist(),
+                'faces': mesh.faces.tolist()
+            }
+        
+        # Write input data
+        with open(input_path, 'w') as f:
+            json.dump({
+                'manager_data': serializable_data,
+                'return_names': return_names,
+                'return_data': return_data
+            }, f)
+        
+        # Create the subprocess script
+        subprocess_script = f'''
+import sys
+import json
+import numpy as np
+import trimesh
+
+def collision_worker_subprocess(manager_data, return_names=True, return_data=False, timeout_seconds=20):
+    try:
+        # Reconstruct the collision manager
+        manager = trimesh.collision.CollisionManager()
+        
+        # Reconstruct mesh objects from serialized data
+        for name, mesh_data in manager_data.items():
+            vertices = np.array(mesh_data['vertices'])
+            faces = np.array(mesh_data['faces'])
+            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+            manager.add_object(name, mesh)
+        
+        # Perform collision detection
+        result = manager.in_collision_internal(return_names=return_names, return_data=return_data)
+        
+        # Convert result to serializable format
+        if isinstance(result, tuple):
+            if len(result) == 3:
+                is_collide, collide_pairs, collide_data = result
+                collide_pairs = list(collide_pairs) if collide_pairs else []
+                collide_data_serializable = []
+                for data in collide_data:
+                    collide_data_serializable.append({{
+                        'names': list(data.names),
+                        'depth': float(data.depth) if hasattr(data, 'depth') else 0.0
+                    }})
+                return {{'success': True, 'result': [is_collide, collide_pairs, collide_data_serializable]}}
+            elif len(result) == 2:
+                is_collide, collide_pairs = result
+                collide_pairs = list(collide_pairs) if collide_pairs else []
+                return {{'success': True, 'result': [is_collide, collide_pairs, []]}}
+            else:
+                return {{'success': True, 'result': [False, [], []]}}
+        else:
+            return {{'success': True, 'result': [False, [], []]}}
+            
+    except Exception as e:
+        return {{'success': False, 'error': str(e)}}
+
+if __name__ == "__main__":
+    # Read input data
+    with open("{input_path}", 'r') as f:
+        data = json.load(f)
+    
+    # Run collision detection
+    result = collision_worker_subprocess(
+        data['manager_data'], 
+        data['return_names'], 
+        data['return_data']
+    )
+    
+    # Write output data
+    with open("{output_path}", 'w') as f:
+        json.dump(result, f)
+'''
+        
+        # Write subprocess script to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+            script_path = script_file.name
+            script_file.write(subprocess_script)
+        
+        try:
+            # Run subprocess
+            process = subprocess.Popen(
+                [sys.executable, script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Wait for completion with timeout
+            try:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+                raise Exception("Subprocess timed out")
+            
+            # Check if subprocess failed
+            if process.returncode != 0:
+                raise Exception(f"Subprocess failed with return code {process.returncode}: {stderr.decode()}")
+            
+            # Read result
+            with open(output_path, 'r') as f:
+                result_data = json.load(f)
+            
+            if not result_data.get('success', False):
+                raise Exception(f"Collision detection failed: {result_data.get('error', 'Unknown error')}")
+            
+            # Convert result back to expected format
+            result = result_data['result']
+            if len(result) == 3:
+                is_collide, collide_pairs, collide_data_serializable = result
+                # Convert lists back to sets
+                collide_pairs = set(collide_pairs) if collide_pairs else set()
+                # Reconstruct collision data objects if needed
+                collide_data = []
+                if return_data and collide_data_serializable:
+                    # Create simple collision data objects
+                    for data in collide_data_serializable:
+                        class SimpleCollisionData:
+                            def __init__(self, names, depth):
+                                self.names = set(names)
+                                self.depth = depth
+                        collide_data.append(SimpleCollisionData(data['names'], data['depth']))
+                
+                return is_collide, collide_pairs, collide_data
+            else:
+                return False, set(), []
+                
+        finally:
+            # Clean up script file
+            try:
+                os.unlink(script_path)
+            except:
+                pass
+                
+    finally:
+        # Clean up temporary files
+        try:
+            os.unlink(input_path)
+            os.unlink(output_path)
+        except:
+            pass
+
+
+def safe_collision_detection(manager_data, return_names=True, return_data=False, timeout_seconds=23):
+    """
+    Safely perform collision detection using subprocess for maximum isolation.
+    This works in all environments including daemon processes.
+    
+    Args:
+        manager_data: dict of mesh objects
+        return_names: whether to return collision pair names
+        return_data: whether to return collision data
+        timeout_seconds: maximum time to wait for collision detection
+    
+    Returns:
+        tuple: (is_collide, collide_pairs, collide_data) or (is_collide, collide_pairs) depending on return_data
+    """
+    return safe_collision_detection_subprocess(manager_data, return_names, return_data, timeout_seconds)
 
 
 class NamedDisjointSet:
@@ -259,11 +449,13 @@ def smart_grouping(meshes: dict):
     # meshes: {name: trimesh.Trimesh, ...}
 
     # use collision manager to find all colliding pairs
-    manager = trimesh.collision.CollisionManager()
-    for name, mesh in meshes.items():
-        manager.add_object(name, mesh)
+    # manager = trimesh.collision.CollisionManager()
+    # for name, mesh in meshes.items():
+    #     manager.add_object(name, mesh)
 
-    is_collide, collide_pairs = manager.in_collision_internal(return_names=True)
+    # is_collide, collide_pairs = manager.in_collision_internal(return_names=True)
+
+    is_collide, collide_pairs, _ = safe_collision_detection(meshes, return_names=True, return_data=False)
     # print(f'[INFO] num_collide = {len(collide_pairs)}, {collide_pairs}')
 
     if not is_collide:
@@ -495,7 +687,8 @@ def normalize_scene(scene):
 
 def color_meshes(meshes, model_name, no_dilate=False, no_merge_odd_loops=False, verbose=False, dilate_size=2/512):
     # build an undirected collision graph
-    manager = trimesh.collision.CollisionManager()
+    # manager = trimesh.collision.CollisionManager()
+    new_meshes = {}
     for name, mesh in meshes.items():
         # scale up the mesh a little bit to take count of the collision margin
         mesh_dilated = mesh.copy()
@@ -506,9 +699,11 @@ def color_meshes(meshes, model_name, no_dilate=False, no_merge_odd_loops=False, 
             scale = (max_radius + dilate_size) / max_radius
             # print(f'[INFO] dilate {name} by {scale}')
             mesh_dilated.vertices = vertices * scale + center
-        manager.add_object(name, mesh_dilated)
+        # manager.add_object(name, mesh_dilated)
+        new_meshes[name] = mesh_dilated
 
-    is_collide, collide_pairs, collide_data = manager.in_collision_internal(return_names=True, return_data=True)
+    # is_collide, collide_pairs, collide_data = manager.in_collision_internal(return_names=True, return_data=True)
+    is_collide, collide_pairs, collide_data = safe_collision_detection(new_meshes, return_names=True, return_data=True)
 
     graph = {name: set() for name in meshes.keys()}
     penetration_depths = {}
